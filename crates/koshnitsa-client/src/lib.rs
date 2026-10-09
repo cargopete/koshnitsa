@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::{Method, StatusCode, header};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 pub use error::Error;
@@ -45,6 +45,12 @@ impl Default for Config {
             algolia_api_key: ALGOLIA_API_KEY.into(),
         }
     }
+}
+
+enum Body<'a> {
+    None,
+    Form(&'a [(&'a str, String)]),
+    Json(&'a Value),
 }
 
 pub struct Client {
@@ -90,7 +96,7 @@ impl Client {
         method: Method,
         path: &str,
         query: &[(&str, String)],
-        form: Option<&[(&str, String)]>,
+        body: Body<'_>,
         needs_auth: bool,
     ) -> Result<T, Error> {
         if needs_auth && self.cookie.is_none() {
@@ -112,11 +118,15 @@ impl Client {
                 req = req.header("x-csrftoken", token);
             }
         }
-        if let Some(form) = form {
+        if !matches!(body, Body::None) {
             req = req
                 .header(header::ORIGIN, &self.config.base_url)
-                .header(header::REFERER, format!("{}/search/", self.config.base_url))
-                .form(form);
+                .header(header::REFERER, format!("{}/search/", self.config.base_url));
+        }
+        match body {
+            Body::None => {}
+            Body::Form(form) => req = req.form(form),
+            Body::Json(json) => req = req.json(json),
         }
 
         let resp = req.send().await?;
@@ -159,12 +169,17 @@ impl Client {
         query: &[(&str, String)],
         needs_auth: bool,
     ) -> Result<T, Error> {
-        self.request(Method::GET, path, query, None, needs_auth)
+        self.request(Method::GET, path, query, Body::None, needs_auth)
             .await
     }
 
     async fn post_form(&self, path: &str, form: &[(&str, String)]) -> Result<Value, Error> {
-        self.request(Method::POST, path, &[], Some(form), true)
+        self.request(Method::POST, path, &[], Body::Form(form), true)
+            .await
+    }
+
+    async fn post_json<T: DeserializeOwned>(&self, path: &str, json: &Value) -> Result<T, Error> {
+        self.request(Method::POST, path, &[], Body::Json(json), true)
             .await
     }
 
@@ -294,6 +309,170 @@ impl Client {
         self.post_form(&format!("/lists/{list_id}/items/update"), &form)
             .await
             .map(drop)
+    }
+}
+
+impl Client {
+    /// Opens a draft order from the current cart. Nothing is ordered until [`Client::finish_checkout`].
+    pub async fn create_checkout(&self) -> Result<String, Error> {
+        let raw: Value = self.post_json("/checkout/create/json", &json!({})).await?;
+        raw["encrypted_id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| Error::Unexpected {
+                status: 200,
+                body: "checkout/create returned no id".into(),
+            })
+    }
+
+    pub async fn checkout(&self, id: &str) -> Result<Value, Error> {
+        self.get(&format!("/checkout/{}/json", checked_id(id)?), &[], true)
+            .await
+    }
+
+    /// `address` is one entry of the user's saved addresses, sent back as eBag gave it.
+    pub async fn set_checkout_address(
+        &self,
+        id: &str,
+        address: &Value,
+        email: &str,
+    ) -> Result<Value, Error> {
+        let contact = json!({
+            "first_name": address["first_name"],
+            "last_name": address["last_name"],
+            "phone_number": address["phone"],
+            "phone_region": address["phone_region"],
+            "email": email,
+        });
+        self.post_json(
+            &format!("/checkout/{}/address-contact-info/json", checked_id(id)?),
+            &json!({ "address": address, "contact_info": contact }),
+        )
+        .await
+    }
+
+    pub async fn set_checkout_slot(
+        &self,
+        id: &str,
+        date: &str,
+        slot_key: &str,
+    ) -> Result<Value, Error> {
+        self.post_json(
+            &format!("/checkout/{}/delivery-date-time/json", checked_id(id)?),
+            &json!({
+                "shipping_date": date,
+                "time_span_slot_key": slot_key,
+                "earlier_delivery_minutes": 0,
+            }),
+        )
+        .await
+    }
+
+    pub async fn set_checkout_tip(&self, id: &str, amount_eur: f64) -> Result<Value, Error> {
+        self.post_json(
+            &format!("/checkout/{}/tip/json", checked_id(id)?),
+            &json!({ "amount": amount_eur }),
+        )
+        .await
+    }
+
+    /// `method` is eBag's numeric id; see [`PaymentMethod`].
+    pub async fn set_checkout_payment(&self, id: &str, method: u32) -> Result<Value, Error> {
+        self.post_json(
+            &format!("/checkout/{}/payment-method/json", checked_id(id)?),
+            &json!({ "payment_method": method }),
+        )
+        .await
+    }
+
+    /// eBag's final validation. The returned hash pins the order to exactly what was reviewed.
+    pub async fn review_checkout(&self, id: &str) -> Result<Review, Error> {
+        let raw: Value = self
+            .post_json(
+                &format!("/checkout/{}/review/json", checked_id(id)?),
+                &json!({}),
+            )
+            .await?;
+        let hash = raw["review_hash"]
+            .as_str()
+            .ok_or_else(|| Error::Unexpected {
+                status: 200,
+                body: "review returned no review_hash".into(),
+            })?;
+        Ok(Review {
+            hash: hash.to_string(),
+            product_changes: raw["product_changes"].clone(),
+            checkout: raw["checkout"].clone(),
+        })
+    }
+
+    /// Places the order. There is no undo from here except cancelling it with eBag.
+    pub async fn finish_checkout(&self, id: &str, review_hash: &str) -> Result<Value, Error> {
+        self.post_json(
+            &format!("/checkout/{}/finish/json", checked_id(id)?),
+            &json!({ "review_hash": review_hash }),
+        )
+        .await
+    }
+
+    /// The saved delivery addresses on the account, as eBag returns them.
+    pub async fn addresses(&self) -> Result<Vec<Value>, Error> {
+        Ok(self.user().await?.addresses)
+    }
+}
+
+/// The pay-on-delivery methods, by the ids in eBag's frontend bundle. Online card payment is left
+/// out on purpose: it can need 3-D Secure, which only a human can pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaymentMethod {
+    Cash,
+    CardOnDelivery,
+}
+
+impl PaymentMethod {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "cash" => Some(Self::Cash),
+            "card_on_delivery" => Some(Self::CardOnDelivery),
+            _ => None,
+        }
+    }
+
+    pub fn from_id(id: u64) -> Option<Self> {
+        match id {
+            3 => Some(Self::Cash),
+            11 => Some(Self::CardOnDelivery),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> u32 {
+        match self {
+            Self::Cash => 3,
+            Self::CardOnDelivery => 11,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cash => "cash",
+            Self::CardOnDelivery => "card_on_delivery",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Review {
+    pub hash: String,
+    pub product_changes: Value,
+    pub checkout: Value,
+}
+
+fn checked_id(id: &str) -> Result<&str, Error> {
+    if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(id)
+    } else {
+        Err(Error::NotFound(id.to_string()))
     }
 }
 

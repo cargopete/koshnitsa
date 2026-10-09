@@ -1,4 +1,6 @@
+mod config;
 mod credentials;
+mod ordering;
 mod server;
 
 use std::io::{IsTerminal, Read};
@@ -109,8 +111,15 @@ async fn serve() -> Result<()> {
     if cookie.is_none() {
         tracing::warn!("no eBag cookie stored; only search, product and slot tools will work");
     }
+    let settings = config::load()?;
+    if settings.ordering.enabled {
+        tracing::info!(
+            cap_eur = settings.ordering.max_total_eur,
+            "ordering enabled"
+        );
+    }
     let client = Client::new(Config::default(), cookie)?;
-    let service = server::Koshnitsa::new(client)
+    let service = server::Koshnitsa::new(client, settings.ordering)
         .serve(rmcp::transport::stdio())
         .await
         .context("starting the MCP server")?;

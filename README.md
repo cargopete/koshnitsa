@@ -19,12 +19,11 @@ edit your cart, read your past orders and shopping lists, and check delivery slo
 > - An AI agent acting on your cart can make mistakes. Check your cart before you order.
 > - It is provided "as is", without warranty of any kind. See the licence.
 
-## What it does, and what it deliberately does not
+## What it does
 
-It **never places an order**. The agent builds the cart; you open the eBag app or
-[ebag.bg/cart](https://ebag.bg/cart/), choose a slot and confirm the order yourself. This is the
-same line Rohlik draws in its official MCP server, and it keeps money, payment and 3-D Secure
-entirely in your hands.
+It covers the whole flow, from search to a placed order. Ordering is **off until you turn it on**,
+and even then the server asks you to confirm every order itself. With ordering off, the agent fills
+the cart and you finish in the eBag app.
 
 | Tool | What it does | Needs login |
 |---|---|---|
@@ -37,11 +36,23 @@ entirely in your hands.
 | `list_orders` / `get_order` | Order history and the items in an order | yes |
 | `reorder` | Copy a past order's items into the cart (does not order) | yes |
 | `list_shopping_lists` / `add_to_shopping_list` | Saved lists | yes |
-| `checkout_summary` | Cart, out-of-stock lines and the next free slots, ready for you to order | yes |
+| `checkout_summary` | Cart, out-of-stock lines and the next free slots | yes |
+| `list_addresses` | Saved delivery addresses | yes |
+| `prepare_order` | Runs eBag's checkout up to its final review and returns eBag's own summary and a token. Orders nothing | yes |
+| `place_order` | Places the prepared order, after you confirm it. Off by default | yes |
 
 Safety rails, enforced in the server rather than left to the agent:
 
-- No ordering tool exists.
+- `place_order` refuses unless ordering is enabled in the config file, which the agent cannot
+  change.
+- It needs a token from `prepare_order` that works once and expires after ten minutes.
+- Before submitting, it asks eBag to review the order again. If anything has changed since you saw
+  the summary (cart, stock or prices), eBag's review hash changes and the server refuses.
+- It refuses totals over your cap and any payment method you have not allowed. Only pay-on-delivery
+  methods exist, so no card is charged online and 3-D Secure never comes up.
+- It asks you directly through MCP elicitation and shows eBag's own figures, not the model's
+  summary. If your client cannot show that prompt, it refuses.
+- Every prepared, declined, placed or failed order is appended to `~/.config/koshnitsa/orders.log`.
 - Quantities are capped at 50 per line and 40 lines per call.
 - Requests are serialised and spaced at least 300 ms apart.
 - Product descriptions are stripped of HTML and cut to 600 characters, and the server tells the
@@ -105,6 +116,20 @@ Use the full path to the binary (`which koshnitsa`) if Claude Desktop cannot fin
 
 It runs locally over stdio. Your cookie never leaves your machine except to go to ebag.bg.
 
+## Enabling ordering
+
+Create `~/.config/koshnitsa/config.toml`:
+
+```toml
+[ordering]
+enabled = true
+max_total_eur = 80                       # refuse anything above this, delivery and tip included
+allowed_payment_methods = ["cash"]       # or "card_on_delivery"
+require_confirmation = true              # ask you before every order; leave this on
+```
+
+Restart the MCP client afterwards. The agent can read the config but has no tool that changes it.
+
 ## Status
 
 What has been checked, and what has not:
@@ -112,8 +137,13 @@ What has been checked, and what has not:
 - **Verified end to end against live ebag.bg with a logged-in account:** search, product detail,
   slots, cart read, add and remove, order history and detail, shopping lists and
   `checkout_summary`.
+- **Checkout:** the address, slot and tip requests were captured from a real checkout session.
+  The payment, review and order requests, and the payment method ids (cash `3`, card on delivery
+  `11`), come from eBag's own frontend code. `prepare_order` has been run live up to the payment
+  step. **`place_order` has never placed a real order.** The first one will be its test, so keep
+  the cap low and check the eBag app afterwards.
 - **Not yet exercised live:** `reorder` and `add_to_shopping_list`. Reports welcome.
-- Not handled: login by email and password, checkout, the mobile app's API.
+- Not handled: login by email and password, online card payment, the mobile app's API.
 
 ## Development
 
