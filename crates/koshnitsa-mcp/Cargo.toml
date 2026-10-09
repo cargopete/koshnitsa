@@ -11,6 +11,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 keyring = "4.2.0"
 koshnitsa-client = { version = "0.1.0", path = "../koshnitsa-client" }
 rmcp = { version = "3.5.1", features = ["server", "transport-io", "macros"] }
+rookie = "0.5.6"
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

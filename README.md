@@ -59,7 +59,17 @@ This installs a binary called `koshnitsa`.
 
 ## Log in
 
-eBag has no API login, so koshnitsa reuses your browser session:
+eBag has no API login, so koshnitsa reuses your browser session. If you are logged in at
+[ebag.bg](https://ebag.bg) in Chrome, Brave, Arc, Edge, Firefox or Safari, the simplest way is:
+
+```sh
+koshnitsa login --browser chrome
+```
+
+This reads the ebag.bg cookies from the browser's own cookie store. On macOS, Chromium browsers
+ask for Keychain access the first time, and Safari needs your terminal to have Full Disk Access.
+
+Or copy the cookie by hand:
 
 1. Log in at [ebag.bg](https://ebag.bg) in your browser.
 2. Open DevTools → Network, click any request to `ebag.bg`, and copy the **Cookie** request header.
