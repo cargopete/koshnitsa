@@ -192,8 +192,6 @@ pub struct CartLine {
 }
 
 impl Cart {
-    // The logged-in cart line shape has not been captured yet, so each field is looked up in the
-    // places the product and order payloads put it rather than at one fixed path.
     pub(crate) fn from_raw(raw: Value) -> Self {
         let lines = raw["items"]
             .as_array()
@@ -394,7 +392,9 @@ impl OrderDetail {
             delivery_date: text(&o["shipping_date"]),
             window: text(&o["timeslot_display"]).or_else(|| text(&o["time_slot_display"])),
             address,
-            total_eur: money(&o["total_price_paid_eur"]).or_else(|| money(&o["total_eur"])),
+            total_eur: money(&raw["total_price_paid_all_orders_eur"])
+                .or_else(|| money(&o["total_price_paid_eur"]))
+                .or_else(|| money(&o["total_eur"])),
             items,
             additional_orders: o["additional_orders"]
                 .as_array()
@@ -550,7 +550,8 @@ mod tests {
     #[test]
     fn cart_line_reads_nested_product() {
         let cart = Cart::from_raw(serde_json::json!({"items": [{
-            "quantity": "2.000",
+            "quantity": 2,
+            "price_eur": "1.89",
             "product": {"id": 7, "name": "Хляб", "is_available": false, "expected_supply_date": "2026-10-11"}
         }]}));
         let line = &cart.lines[0];

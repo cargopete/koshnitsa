@@ -99,11 +99,11 @@ It runs locally over stdio. Your cookie never leaves your machine except to go t
 
 What has been checked, and what has not:
 
-- **Verified against live ebag.bg:** search, product detail and delivery slots, anonymously, through
-  the full MCP stdio path.
-- **Built from known endpoints but not yet exercised against a logged-in account:** cart, orders,
-  reorder and shopping lists. The cart line format in particular is parsed defensively because the
-  logged-in shape has not been captured yet. Reports welcome.
+- **Verified against live ebag.bg:** search, product detail and delivery slots through the full MCP
+  stdio path; the cart, order and shopping-list payload shapes against a logged-in account; and a
+  cart add followed by removal (quantity 0).
+- **Not yet run end to end through the MCP server with a logged-in account:** the cart, order,
+  reorder and list tools. Reports welcome.
 - Not handled: login by email and password, checkout, the mobile app's API.
 
 ## Development
