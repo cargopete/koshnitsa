@@ -44,6 +44,7 @@ enum Browser {
     Arc,
     Edge,
     Firefox,
+    #[cfg(target_os = "macos")]
     Safari,
 }
 
@@ -56,6 +57,7 @@ impl Browser {
             Browser::Arc => rookie::arc(domains),
             Browser::Edge => rookie::edge(domains),
             Browser::Firefox => rookie::firefox(domains),
+            #[cfg(target_os = "macos")]
             Browser::Safari => rookie::safari(domains),
         }
         .map_err(|e| anyhow::anyhow!("reading the browser's cookies: {e}"))?;
