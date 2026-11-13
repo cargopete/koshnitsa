@@ -1,0 +1,42 @@
+# yatr - https://github.com/cargopete/yatr
+#
+# CI calls these tasks by name, so `yatr ci` locally is the same gate.
+
+[env]
+CARGO_TERM_COLOR = "always"
+
+[settings]
+cache = true
+
+[tasks.fmt]
+desc = "Format the tree"
+run = ["cargo fmt --all"]
+no_cache = true
+
+[tasks.fmt-check]
+desc = "Fail if the tree is unformatted (CI: test)"
+run = ["cargo fmt --all --check"]
+sources = ["crates/**/*.rs"]
+
+[tasks.lint]
+desc = "Clippy with warnings denied (CI: test)"
+run = ["cargo clippy --workspace --all-targets -- -D warnings"]
+sources = ["crates/**", "Cargo.toml", "Cargo.lock"]
+
+# The fixtures are captured eBag responses; the tests never contact ebag.bg.
+[tasks.test]
+desc = "The test suite (CI: test)"
+run = ["cargo test --workspace"]
+sources = ["crates/**", "Cargo.toml", "Cargo.lock"]
+watch = ["crates/**"]
+
+[tasks.build]
+desc = "Release build of the koshnitsa binary"
+run = ["cargo build --release -p koshnitsa-mcp"]
+sources = ["crates/**", "Cargo.toml", "Cargo.lock"]
+outputs = ["target/release/koshnitsa"]
+
+[tasks.ci]
+desc = "What the CI test job runs: fmt-check, lint, test"
+depends = ["fmt-check", "lint", "test"]
+run = []
