@@ -22,7 +22,7 @@ jobs:
       - name: Install yatr
         if: steps.cache-yatr.outputs.cache-hit != 'true'
         # RUSTFLAGS cleared so yatr does not inherit this project's flags.
-        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked --force
         env:
           RUSTFLAGS: ""
       - run: yatr fmt-check
